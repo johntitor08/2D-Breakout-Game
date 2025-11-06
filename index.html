@@ -243,7 +243,7 @@
             </div>
 
             <div id="gameOverScreen" class="screen hidden">
-                <h1>GAME OVER</h1>
+                <h1 id="gameOverTitle">GAME OVER</h1>
                 <div id="gameOverMessage" class="game-over-message">You ran out of lives!</div>
                 <div id="finalScore" class="final-score">Score: 0</div>
 
@@ -267,16 +267,47 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.90.0/phaser.js"></script>
     <script>
-        // Mock online leaderboard (in a real game, this would connect to a server)
+        // Fixed online leaderboard - only shows highest score per player
         class Leaderboard {
             constructor() {
                 this.scores = JSON.parse(localStorage.getItem('breakoutLeaderboard')) || [];
+                this.ensureUniquePlayers();
+            }
+
+            ensureUniquePlayers() {
+                // Keep only the highest score for each player
+                const playerScores = {};
+
+                this.scores.forEach(score => {
+                    if (!playerScores[score.name] || score.score > playerScores[score.name].score) {
+                        playerScores[score.name] = score;
+                    }
+                });
+
+                this.scores = Object.values(playerScores);
+                this.scores.sort((a, b) => b.score - a.score);
+                this.scores = this.scores.slice(0, 10); // Keep top 10
+                localStorage.setItem('breakoutLeaderboard', JSON.stringify(this.scores));
             }
 
             addScore(name, score) {
-                this.scores.push({ name, score, date: new Date().toLocaleDateString() });
+                // Check if player already exists
+                const existingIndex = this.scores.findIndex(s => s.name === name);
+
+                if (existingIndex !== -1) {
+                    // Update score if it's higher
+                    if (score > this.scores[existingIndex].score) {
+                        this.scores[existingIndex].score = score;
+                        this.scores[existingIndex].date = new Date().toLocaleDateString();
+                    }
+                } else {
+                    // Add new score
+                    this.scores.push({ name, score, date: new Date().toLocaleDateString() });
+                }
+
+                // Sort and keep top 10
                 this.scores.sort((a, b) => b.score - a.score);
-                this.scores = this.scores.slice(0, 10); // Keep top 10
+                this.scores = this.scores.slice(0, 10);
                 localStorage.setItem('breakoutLeaderboard', JSON.stringify(this.scores));
             }
 
@@ -325,6 +356,12 @@
                 this.movingBricks = [];
                 this.leaderboard = new Leaderboard();
                 this.playerName = "Player";
+
+                // Store collider references
+                this.ballPaddleCollider = null;
+                this.ballBricksCollider = null;
+                this.paddlePowerUpCollider = null;
+                this.laserBricksCollider = null;
             }
 
             preload() {
@@ -404,10 +441,7 @@
                 this.initLasers();
 
                 // Set up collisions
-                this.physics.add.collider(this.balls, this.paddle, this.hitPaddle, null, this);
-                this.physics.add.collider(this.balls, this.bricks, this.hitBrick, null, this);
-                this.physics.add.overlap(this.paddle, this.powerUps, this.collectPowerUp, null, this);
-                this.physics.add.overlap(this.lasers, this.bricks, this.hitBrickWithLaser, null, this);
+                this.setupCollisions();
 
                 // Set up input
                 this.input.on('pointermove', (pointer) => {
@@ -429,7 +463,9 @@
                 });
 
                 document.getElementById('restartButton').addEventListener('click', () => {
-                    this.scene.restart();
+                    if (!this.playing) {
+                        this.restartGame();
+                    }
                 });
 
                 // Render leaderboard on start screen
@@ -437,6 +473,28 @@
 
                 // Ask for player name
                 this.playerName = prompt("Enter your name for the leaderboard:", "Player") || "Player";
+            }
+
+            setupCollisions() {
+                // Remove existing colliders if they exist
+                if (this.ballPaddleCollider) {
+                    this.ballPaddleCollider.destroy();
+                }
+                if (this.ballBricksCollider) {
+                    this.ballBricksCollider.destroy();
+                }
+                if (this.paddlePowerUpCollider) {
+                    this.paddlePowerUpCollider.destroy();
+                }
+                if (this.laserBricksCollider) {
+                    this.laserBricksCollider.destroy();
+                }
+
+                // Set up new colliders
+                this.ballPaddleCollider = this.physics.add.collider(this.balls, this.paddle, this.hitPaddle, null, this);
+                this.ballBricksCollider = this.physics.add.collider(this.balls, this.bricks, this.hitBrick, null, this);
+                this.paddlePowerUpCollider = this.physics.add.overlap(this.paddle, this.powerUps, this.collectPowerUp, null, this);
+                this.laserBricksCollider = this.physics.add.overlap(this.lasers, this.bricks, this.hitBrickWithLaser, null, this);
             }
 
             update() {
@@ -456,7 +514,7 @@
                 this.updateMovingBricks();
 
                 // Check win condition
-                if (this.bricks.countActive() === 0) {
+                if (this.bricks.countActive() === 0 && this.playing) {
                     this.winGame();
                 }
 
@@ -782,6 +840,8 @@
                 // Add score to leaderboard
                 this.leaderboard.addScore(this.playerName, this.score);
 
+                document.getElementById('gameOverTitle').textContent = 'GAME OVER';
+                document.getElementById('gameOverMessage').textContent = 'You ran out of lives!';
                 document.getElementById('finalScore').textContent = `FINAL SCORE: ${this.score}`;
                 this.leaderboard.render('gameOverLeaderboard');
                 document.getElementById('gameOverScreen').classList.remove('hidden');
@@ -793,7 +853,8 @@
                 // Add score to leaderboard
                 this.leaderboard.addScore(this.playerName, this.score);
 
-                document.getElementById('gameOverMessage').textContent = 'YOU WIN!';
+                document.getElementById('gameOverTitle').textContent = 'VICTORY!';
+                document.getElementById('gameOverMessage').textContent = 'You broke all the bricks!';
                 document.getElementById('finalScore').textContent = `FINAL SCORE: ${this.score}`;
                 this.leaderboard.render('gameOverLeaderboard');
                 document.getElementById('gameOverScreen').classList.remove('hidden');
@@ -815,6 +876,51 @@
                         ease: 'Power2'
                     });
                 }
+            }
+
+            restartGame() {
+                // Hide game over screen
+                document.getElementById('gameOverScreen').classList.add('hidden');
+
+                // Reset game state
+                this.score = 0;
+                this.lives = 3;
+                this.ballSpeed = 200;
+                this.playing = false;
+                this.laserActive = false;
+                this.multiBallActive = false;
+                this.laserCooldown = false;
+
+                // Hide power-up indicators
+                document.getElementById('laserIndicator').style.display = 'none';
+                document.getElementById('multiBallIndicator').style.display = 'none';
+
+                // Clear all game objects
+                this.balls.forEach(ball => ball.destroy());
+                this.balls = [];
+                this.powerUps.clear(true, true);
+                this.lasers.clear(true, true);
+                this.bricks.clear(true, true);
+                this.movingBricks = [];
+
+                // Reset paddle position
+                this.paddle.setPosition(this.game.config.width / 2, this.game.config.height - 20);
+
+                // Recreate game objects
+                this.createBall();
+                this.initBricks();
+                this.initPowerUps();
+                this.initLasers();
+
+                // Re-setup collisions with new objects
+                this.setupCollisions();
+
+                // Update UI
+                document.getElementById('scoreDisplay').querySelector('span').textContent = this.score;
+                document.getElementById('livesDisplay').querySelector('span').textContent = this.lives;
+
+                // Show start screen
+                document.getElementById('startScreen').classList.remove('hidden');
             }
         }
 
