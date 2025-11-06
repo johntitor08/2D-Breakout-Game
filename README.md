@@ -1,6 +1,9 @@
-# Breakout Game - Advanced Edition
+# 2D Breakout Game - Advanced Edition
 
 A modern, feature-rich implementation of the classic Breakout arcade game built with Phaser 3.
+
+![Game Image](img/G5FwfswW8AAOKRe.jpeg)
+![Game Image](img/G5FwfqWWIAEuGrB.jpeg)
 
 ## 🎮 Features
 
